@@ -16,6 +16,10 @@ Generates a grid of outline squares. Power varies across columns and speed varie
 
 Generates a grid of filled squares with hatch spacing. Power varies across columns and speed varies across rows.
 
+## SD export
+
+Each mode has a `Save ... to SD` button that writes a `.nc` file under `/sd/` so you can download it later from FigUI's file manager.
+
 ### Parameters
 
 - Line length

@@ -66,6 +66,7 @@
 
           <div class="action-bar">
             <button id="start-focus-btn" class="primary-btn">Start Focus Test</button>
+            <button id="save-focus-btn" class="secondary-btn">Save Focus to SD</button>
             <button id="abort-btn" class="danger-btn" style="display:none">Abort</button>
             <button id="reset-btn" class="secondary-btn" style="display:none">Reset</button>
           </div>
@@ -117,6 +118,7 @@
             </div>
             <div class="action-bar">
               <button id="start-cut-btn" class="primary-btn">Start Cut Grid</button>
+              <button id="save-cut-btn" class="secondary-btn">Save Cut to SD</button>
             </div>
           </div>
 
@@ -166,6 +168,7 @@
             </div>
             <div class="action-bar">
               <button id="start-engrave-btn" class="primary-btn">Start Engrave Grid</button>
+              <button id="save-engrave-btn" class="secondary-btn">Save Engrave to SD</button>
             </div>
           </div>
         </div>
@@ -389,6 +392,126 @@ function savePlan() {
       })
     } catch (_) {}
   }, 250)
+}
+
+function safeFileStamp() {
+  const d = new Date()
+  const p = n => String(n).padStart(2, '0')
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+}
+
+function fileNameForMode(mode) {
+  return `laser-ops-${mode}-${safeFileStamp()}.nc`
+}
+
+function textStrokeCommands(text, x, y, scale, feed) {
+  const lines = []
+  let cursor = x
+  for (const ch of String(text)) {
+    const glyph = fontGlyph(ch)
+    for (const seg of glyph) {
+      lines.push(`G0 X${fmt(cursor + seg[0] * scale)} Y${fmt(y + seg[1] * scale)}`)
+      lines.push(`G1 X${fmt(cursor + seg[2] * scale)} Y${fmt(y + seg[3] * scale)} F${Math.round(feed)}`)
+    }
+    cursor += 6 * scale
+  }
+  return lines
+}
+
+function buildFocusGcode() {
+  const p = buildPlan()
+  const lines = ['(Laser Ops focus test)', 'G90 G21', 'M5', `G1 Z${fmt(p.safeZ)} F${fmt(p.zFeed)}`, 'G0 X0 Y0']
+  for (const pass of p.passes) {
+    lines.push(`G0 X${fmt(pass.startX)} Y${fmt(pass.y)}`)
+    lines.push(`G1 Z${fmt(pass.z)} F${fmt(p.zFeed)}`)
+    lines.push(`M4 S${Math.round(p.laserPower)}`)
+    lines.push(`G1 X${fmt(pass.endX)} F${Math.round(p.feedRate)}`)
+    lines.push('M5')
+    lines.push(`G1 Z${fmt(p.safeZ)} F${fmt(p.zFeed)}`)
+  }
+  lines.push(`G1 Z${fmt(p.safeZ)} F${fmt(p.zFeed)}`, 'M5', 'M30')
+  return lines.join('\n') + '\n'
+}
+
+function buildCutGcode() {
+  const p = buildGridPlan('cut')
+  const lines = ['(Laser Ops cut grid)', 'G90 G21', 'M5', `G1 Z${fmt(p.safeZ)} F600`, 'G0 X0 Y0']
+  const stepX = p.squareSize + p.gap
+  const stepY = p.squareSize + p.gap
+  const labelMargin = 10
+  const labelPower = 30
+  for (let col = 0; col < p.cols; col++) {
+    const x = labelMargin + col * stepX
+    lines.push('M5', `M4 S${labelPower}`)
+    lines.push(...textStrokeCommands(compactValue(p.powerStart + col * p.powerStep), x, labelMargin - 6, 2.2, 900))
+    lines.push('M5')
+  }
+  for (let row = 0; row < p.rows; row++) {
+    const y = labelMargin + row * stepY + p.squareSize * 0.6
+    lines.push('M5', `M4 S${labelPower}`)
+    lines.push(...textStrokeCommands(compactValue(p.speedStart + row * p.speedStep), labelMargin - 8, y, 2.2, 900))
+    lines.push('M5')
+  }
+  for (const cell of p.cells) {
+    const x = labelMargin + cell.col * stepX
+    const y = labelMargin + cell.row * stepY
+    lines.push(`G0 X${fmt(x)} Y${fmt(y)}`)
+    lines.push(`G1 Z${fmt(p.depth)} F600`)
+    lines.push(`M4 S${Math.round(cell.power)}`)
+    lines.push(`G1 F${Math.round(cell.speed)}`)
+    lines.push(`G1 X${fmt(x + p.squareSize)} Y${fmt(y)}`)
+    lines.push(`G1 X${fmt(x + p.squareSize)} Y${fmt(y + p.squareSize)}`)
+    lines.push(`G1 X${fmt(x)} Y${fmt(y + p.squareSize)}`)
+    lines.push(`G1 X${fmt(x)} Y${fmt(y)}`)
+    lines.push('M5')
+    lines.push(`G1 Z${fmt(p.safeZ)} F600`)
+  }
+  lines.push(`G1 Z${fmt(p.safeZ)} F600`, 'M5', 'M30')
+  return lines.join('\n') + '\n'
+}
+
+function buildEngraveGcode() {
+  const p = buildGridPlan('engrave')
+  const lines = ['(Laser Ops engrave grid)', 'G90 G21', 'M5', `G1 Z${fmt(p.safeZ)} F600`, 'G0 X0 Y0']
+  const stepX = p.squareSize + p.gap
+  const stepY = p.squareSize + p.gap
+  const labelMargin = 10
+  const labelPower = 30
+  for (let col = 0; col < p.cols; col++) {
+    const x = labelMargin + col * stepX
+    lines.push('M5', `M4 S${labelPower}`)
+    lines.push(...textStrokeCommands(compactValue(p.powerStart + col * p.powerStep), x, labelMargin - 6, 2.2, 900))
+    lines.push('M5')
+  }
+  for (let row = 0; row < p.rows; row++) {
+    const y = labelMargin + row * stepY + p.squareSize * 0.6
+    lines.push('M5', `M4 S${labelPower}`)
+    lines.push(...textStrokeCommands(compactValue(p.speedStart + row * p.speedStep), labelMargin - 8, y, 2.2, 900))
+    lines.push('M5')
+  }
+  for (const cell of p.cells) {
+    const x = labelMargin + cell.col * stepX
+    const y = labelMargin + cell.row * stepY
+    lines.push(`G0 X${fmt(x)} Y${fmt(y)}`)
+    lines.push(`G1 Z${fmt(p.depth)} F600`)
+    lines.push(`M4 S${Math.round(cell.power)}`)
+    for (let yy = y; yy <= y + p.squareSize + 1e-6; yy += p.lineInterval) {
+      lines.push(`G1 X${fmt(x + p.squareSize)} Y${fmt(yy)} F${Math.round(cell.speed)}`)
+      lines.push(`G1 X${fmt(x)} Y${fmt(yy)} F${Math.round(cell.speed)}`)
+    }
+    lines.push('M5')
+    lines.push(`G1 Z${fmt(p.safeZ)} F600`)
+  }
+  lines.push(`G1 Z${fmt(p.safeZ)} F600`, 'M5', 'M30')
+  return lines.join('\n') + '\n'
+}
+
+async function saveCurrentModeToSd(mode) {
+  const content = mode === 'focus' ? buildFocusGcode() : mode === 'cut' ? buildCutGcode() : buildEngraveGcode()
+  const path = `/sd/${fileNameForMode(mode)}`
+  await call('writeFile', { path, content, fs: 'sd' })
+  toast(`Saved to SD: ${path}`, 'ok')
+  $('results').innerHTML = `<div class="result-line"><span class="result-label">Saved</span><span class="result-value">${path}</span></div>`
 }
 
 function loadParams(settings) {
@@ -942,8 +1065,11 @@ function hookInputs() {
     })
   }
   $('start-focus-btn').addEventListener('click', startFocus)
+  $('save-focus-btn').addEventListener('click', () => saveCurrentModeToSd('focus'))
   $('start-cut-btn').addEventListener('click', startCutGrid)
+  $('save-cut-btn').addEventListener('click', () => saveCurrentModeToSd('cut'))
   $('start-engrave-btn').addEventListener('click', startEngraveGrid)
+  $('save-engrave-btn').addEventListener('click', () => saveCurrentModeToSd('engrave'))
   $('abort-btn').addEventListener('click', abortFocus)
   $('reset-btn').addEventListener('click', resetView)
   for (const t of ['focus', 'cut', 'engrave']) {
