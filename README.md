@@ -42,7 +42,6 @@ Saved files appear in the left-hand SD panel and can be previewed or downloaded 
 - Laser power
 - Feed rate
 - Z feed
-- Safe Z
 
 ### Assumption
 

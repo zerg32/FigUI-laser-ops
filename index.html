@@ -54,11 +54,6 @@
             <span class="param-label">Z feed</span>
             <div class="param-controls"><input id="z-feed" class="param-input" type="number" min="1" step="1" value="600"><span class="param-unit">mm/min</span></div>
           </div>
-          <div class="param-row">
-            <span class="param-label">Safe Z</span>
-            <div class="param-controls"><input id="safe-z" class="param-input" type="number" min="0" step="0.1" value="5"><span class="param-unit">mm</span></div>
-          </div>
-
           <div class="hint">
             Put the machine at the intended work zero before starting. The plugin assumes the CNC is already zeroed and uses absolute work coordinates from there.
             Line spacing is auto-derived from the chosen line length and step count.
@@ -109,10 +104,6 @@
               <span class="param-label">Cut depth</span>
               <div class="param-controls"><input id="cut-depth" class="param-input" type="number" min="0" step="0.01" value="-0.4"><span class="param-unit">mm</span></div>
             </div>
-            <div class="param-row">
-              <span class="param-label">Safe Z</span>
-              <div class="param-controls"><input id="cut-safe-z" class="param-input" type="number" min="0" step="0.1" value="5"><span class="param-unit">mm</span></div>
-            </div>
             <div class="hint">
               Each cell is a cut-only square. Power is varied across columns and speed is varied across rows.
             </div>
@@ -158,10 +149,6 @@
             <div class="param-row">
               <span class="param-label">Engrave depth</span>
               <div class="param-controls"><input id="engrave-depth" class="param-input" type="number" min="0" step="0.01" value="-0.2"><span class="param-unit">mm</span></div>
-            </div>
-            <div class="param-row">
-              <span class="param-label">Safe Z</span>
-              <div class="param-controls"><input id="engrave-safe-z" class="param-input" type="number" min="0" step="0.1" value="5"><span class="param-unit">mm</span></div>
             </div>
             <div class="hint">
               Each cell is an engraved fill square. Power is varied across columns and speed is varied across rows.
@@ -225,7 +212,6 @@ const defaults = {
   laserPower: 100,
   feedRate: 1200,
   zFeed: 600,
-  safeZ: 5,
   cut: {
     cols: 5,
     rows: 5,
@@ -236,7 +222,6 @@ const defaults = {
     squareSize: 12,
     gap: 3,
     depth: -0.4,
-    safeZ: 5,
   },
   engrave: {
     cols: 5,
@@ -248,7 +233,6 @@ const defaults = {
     squareSize: 12,
     lineInterval: 0.5,
     depth: -0.2,
-    safeZ: 5,
   }
 }
 
@@ -316,10 +300,9 @@ function readParams() {
   const laserPower = Math.max(0, num('laser-power', defaults.laserPower))
   const feedRate = Math.max(1, num('feed-rate', defaults.feedRate))
   const zFeed = Math.max(1, num('z-feed', defaults.zFeed))
-  const safeZ = Math.max(0, num('safe-z', defaults.safeZ))
   const linePitch = stepCount > 1 ? clamp(lineLength / stepCount, 1, 20) : 0
 
-  return { lineLength, zStep, stepCount, laserPower, feedRate, zFeed, safeZ, linePitch }
+  return { lineLength, zStep, stepCount, laserPower, feedRate, zFeed, linePitch }
 }
 
 function readGridParams(prefix) {
@@ -331,7 +314,6 @@ function readGridParams(prefix) {
     speedStart: Math.max(1, num(`${prefix}-speed-start`, defaults[prefix].speedStart)),
     speedStep: Math.max(0, num(`${prefix}-speed-step`, defaults[prefix].speedStep)),
     squareSize: Math.max(1, num(`${prefix}-square-size`, defaults[prefix].squareSize)),
-    safeZ: Math.max(0, num(`${prefix}-safe-z`, defaults[prefix].safeZ)),
     depth: num(`${prefix}-depth`, defaults[prefix].depth),
   }
   if (prefix === 'cut') base.gap = Math.max(0, num('cut-gap', defaults.cut.gap))
@@ -420,22 +402,21 @@ function textStrokeCommands(text, x, y, scale, feed) {
 
 function buildFocusGcode() {
   const p = buildPlan()
-  const lines = ['(Laser Ops focus test)', 'G90 G21', 'M5', `G1 Z${fmt(p.safeZ)} F${fmt(p.zFeed)}`, 'G0 X0 Y0']
+  const lines = ['(Laser Ops focus test)', 'G90 G21', 'M5', 'G0 X0 Y0']
   for (const pass of p.passes) {
     lines.push(`G0 X${fmt(pass.startX)} Y${fmt(pass.y)}`)
     lines.push(`G1 Z${fmt(pass.z)} F${fmt(p.zFeed)}`)
     lines.push(`M4 S${Math.round(p.laserPower)}`)
     lines.push(`G1 X${fmt(pass.endX)} F${Math.round(p.feedRate)}`)
     lines.push('M5')
-    lines.push(`G1 Z${fmt(p.safeZ)} F${fmt(p.zFeed)}`)
   }
-  lines.push(`G1 Z${fmt(p.safeZ)} F${fmt(p.zFeed)}`, 'M5', 'M30')
+  lines.push('M5', 'M30')
   return lines.join('\n') + '\n'
 }
 
 function buildCutGcode() {
   const p = buildGridPlan('cut')
-  const lines = ['(Laser Ops cut grid)', 'G90 G21', 'M5', `G1 Z${fmt(p.safeZ)} F600`, 'G0 X0 Y0']
+  const lines = ['(Laser Ops cut grid)', 'G90 G21', 'M5', 'G0 X0 Y0']
   const stepX = p.squareSize + p.gap
   const stepY = p.squareSize + p.gap
   const labelMargin = 10
@@ -464,15 +445,14 @@ function buildCutGcode() {
     lines.push(`G1 X${fmt(x)} Y${fmt(y + p.squareSize)}`)
     lines.push(`G1 X${fmt(x)} Y${fmt(y)}`)
     lines.push('M5')
-    lines.push(`G1 Z${fmt(p.safeZ)} F600`)
   }
-  lines.push(`G1 Z${fmt(p.safeZ)} F600`, 'M5', 'M30')
+  lines.push('M5', 'M30')
   return lines.join('\n') + '\n'
 }
 
 function buildEngraveGcode() {
   const p = buildGridPlan('engrave')
-  const lines = ['(Laser Ops engrave grid)', 'G90 G21', 'M5', `G1 Z${fmt(p.safeZ)} F600`, 'G0 X0 Y0']
+  const lines = ['(Laser Ops engrave grid)', 'G90 G21', 'M5', 'G0 X0 Y0']
   const stepX = p.squareSize + p.gap
   const stepY = p.squareSize + p.gap
   const labelMargin = 10
@@ -500,9 +480,8 @@ function buildEngraveGcode() {
       lines.push(`G1 X${fmt(x)} Y${fmt(yy)} F${Math.round(cell.speed)}`)
     }
     lines.push('M5')
-    lines.push(`G1 Z${fmt(p.safeZ)} F600`)
   }
-  lines.push(`G1 Z${fmt(p.safeZ)} F600`, 'M5', 'M30')
+  lines.push('M5', 'M30')
   return lines.join('\n') + '\n'
 }
 
@@ -522,7 +501,6 @@ function loadParams(settings) {
   $('laser-power').value = focus.laserPower
   $('feed-rate').value = focus.feedRate
   $('z-feed').value = focus.zFeed
-  $('safe-z').value = focus.safeZ
   const cut = { ...defaults.cut, ...(settings?.cut || {}) }
   $('cut-cols').value = cut.cols
   $('cut-rows').value = cut.rows
@@ -533,7 +511,6 @@ function loadParams(settings) {
   $('cut-square-size').value = cut.squareSize
   $('cut-gap').value = cut.gap
   $('cut-depth').value = cut.depth
-  $('cut-safe-z').value = cut.safeZ
   const engrave = { ...defaults.engrave, ...(settings?.engrave || {}) }
   $('engrave-cols').value = engrave.cols
   $('engrave-rows').value = engrave.rows
@@ -544,7 +521,6 @@ function loadParams(settings) {
   $('engrave-square-size').value = engrave.squareSize
   $('engrave-line-interval').value = engrave.lineInterval
   $('engrave-depth').value = engrave.depth
-  $('engrave-safe-z').value = engrave.safeZ
 }
 
 function renderPlan() {
@@ -815,7 +791,6 @@ async function startFocus() {
   try {
     await call('sendCommand', { command: 'G90 G21' })
     await call('sendCommand', { command: 'M5' })
-    await call('sendCommand', { command: `G1 Z${fmt(plan.safeZ)} F${fmt(plan.zFeed)}` })
     await call('sendCommand', { command: 'G0 X0 Y0' })
 
     for (const pass of plan.passes) {
@@ -828,7 +803,6 @@ async function startFocus() {
       await call('sendCommand', { command: `M4 S${Math.round(plan.laserPower)}` })
       await call('sendCommand', { command: `G1 X${fmt(pass.endX)} F${fmt(plan.feedRate)}` })
       await call('sendCommand', { command: 'M5' })
-      await call('sendCommand', { command: `G1 Z${fmt(plan.safeZ)} F${fmt(plan.zFeed)}` })
 
       setPassState(pass.index, 'done', `Z ${fmt(pass.z)} mm`)
       if (pass.index === plan.passes.length - 1) break
@@ -846,7 +820,6 @@ async function startFocus() {
     if (state.abort) toast('Aborted', 'warn')
     else toast(err.message || 'Focus test failed', 'err')
     try { await call('sendCommand', { command: 'M5' }) } catch (_) {}
-    try { await call('sendCommand', { command: `G1 Z${fmt(plan.safeZ)} F${fmt(plan.zFeed)}` }) } catch (_) {}
     $('results').innerHTML = `
       <div class="result-line"><span class="result-label">Stopped</span><span class="result-value">${err.message || 'Error'}</span></div>
     `
@@ -876,7 +849,6 @@ async function startCutGrid() {
   try {
     await call('sendCommand', { command: 'G90 G21' })
     await call('sendCommand', { command: 'M5' })
-    await call('sendCommand', { command: `G1 Z${fmt(plan.safeZ)} F600` })
     await call('sendCommand', { command: 'G0 X0 Y0' })
     const stepX = plan.squareSize + plan.gap
     const stepY = plan.squareSize + plan.gap
@@ -894,7 +866,6 @@ async function startCutGrid() {
       await call('sendCommand', { command: `G1 F${Math.round(cell.speed)}` })
       await cutSquarePath(ox, oy, plan.squareSize, cell.speed)
       await call('sendCommand', { command: 'M5' })
-      await call('sendCommand', { command: `G1 Z${fmt(plan.safeZ)} F600` })
       setPassState(cell.row * plan.cols + cell.col, 'done', `S ${fmt(cell.power)} / F ${fmt(cell.speed)}`)
     }
     $('results').innerHTML = `<div class="result-line"><span class="result-label">Cells</span><span class="result-value">${plan.cells.length}</span></div>`
@@ -937,7 +908,6 @@ async function startEngraveGrid() {
   try {
     await call('sendCommand', { command: 'G90 G21' })
     await call('sendCommand', { command: 'M5' })
-    await call('sendCommand', { command: `G1 Z${fmt(plan.safeZ)} F600` })
     await call('sendCommand', { command: 'G0 X0 Y0' })
     const stepX = plan.squareSize + plan.gap
     const stepY = plan.squareSize + plan.gap
@@ -954,7 +924,6 @@ async function startEngraveGrid() {
       await call('sendCommand', { command: `M4 S${Math.round(cell.power)}` })
       await engraveFilledSquare(ox, oy, plan.squareSize, plan.lineInterval, cell.speed)
       await call('sendCommand', { command: 'M5' })
-      await call('sendCommand', { command: `G1 Z${fmt(plan.safeZ)} F600` })
       setPassState(cell.row * plan.cols + cell.col, 'done', `S ${fmt(cell.power)} / F ${fmt(cell.speed)}`)
     }
     $('results').innerHTML = `<div class="result-line"><span class="result-label">Cells</span><span class="result-value">${plan.cells.length}</span></div>`
@@ -1058,7 +1027,7 @@ function activateTab(tab) {
 }
 
 function hookInputs() {
-  for (const id of ['line-length', 'z-step', 'step-count', 'laser-power', 'feed-rate', 'z-feed', 'safe-z', 'cut-cols', 'cut-rows', 'cut-power-start', 'cut-power-step', 'cut-speed-start', 'cut-speed-step', 'cut-square-size', 'cut-gap', 'cut-depth', 'cut-safe-z', 'engrave-cols', 'engrave-rows', 'engrave-power-start', 'engrave-power-step', 'engrave-speed-start', 'engrave-speed-step', 'engrave-square-size', 'engrave-line-interval', 'engrave-depth', 'engrave-safe-z']) {
+  for (const id of ['line-length', 'z-step', 'step-count', 'laser-power', 'feed-rate', 'z-feed', 'cut-cols', 'cut-rows', 'cut-power-start', 'cut-power-step', 'cut-speed-start', 'cut-speed-step', 'cut-square-size', 'cut-gap', 'cut-depth', 'engrave-cols', 'engrave-rows', 'engrave-power-start', 'engrave-power-step', 'engrave-speed-start', 'engrave-speed-step', 'engrave-square-size', 'engrave-line-interval', 'engrave-depth']) {
     $(id).addEventListener('input', () => {
       renderPlan()
       savePlan()
