@@ -100,10 +100,6 @@
               <span class="param-label">Gap</span>
               <div class="param-controls"><input id="cut-gap" class="param-input" type="number" min="0" step="0.1" value="3"><span class="param-unit">mm</span></div>
             </div>
-            <div class="param-row">
-              <span class="param-label">Cut depth</span>
-              <div class="param-controls"><input id="cut-depth" class="param-input" type="number" min="0" step="0.01" value="-0.4"><span class="param-unit">mm</span></div>
-            </div>
             <div class="hint">
               Each cell is a cut-only square. Power is varied across columns and speed is varied across rows.
             </div>
@@ -145,10 +141,6 @@
             <div class="param-row">
               <span class="param-label">Line interval</span>
               <div class="param-controls"><input id="engrave-line-interval" class="param-input" type="number" min="0.1" step="0.1" value="0.5"><span class="param-unit">mm</span></div>
-            </div>
-            <div class="param-row">
-              <span class="param-label">Engrave depth</span>
-              <div class="param-controls"><input id="engrave-depth" class="param-input" type="number" min="0" step="0.01" value="-0.2"><span class="param-unit">mm</span></div>
             </div>
             <div class="hint">
               Each cell is an engraved fill square. Power is varied across columns and speed is varied across rows.
@@ -221,7 +213,6 @@ const defaults = {
     speedStep: 300,
     squareSize: 12,
     gap: 3,
-    depth: -0.4,
   },
   engrave: {
     cols: 5,
@@ -232,7 +223,6 @@ const defaults = {
     speedStep: 300,
     squareSize: 12,
     lineInterval: 0.5,
-    depth: -0.2,
   }
 }
 
@@ -314,7 +304,6 @@ function readGridParams(prefix) {
     speedStart: Math.max(1, num(`${prefix}-speed-start`, defaults[prefix].speedStart)),
     speedStep: Math.max(0, num(`${prefix}-speed-step`, defaults[prefix].speedStep)),
     squareSize: Math.max(1, num(`${prefix}-square-size`, defaults[prefix].squareSize)),
-    depth: num(`${prefix}-depth`, defaults[prefix].depth),
   }
   if (prefix === 'cut') base.gap = Math.max(0, num('cut-gap', defaults.cut.gap))
   if (prefix === 'engrave') base.lineInterval = Math.max(0.05, num('engrave-line-interval', defaults.engrave.lineInterval))
@@ -437,7 +426,6 @@ function buildCutGcode() {
     const x = labelMargin + cell.col * stepX
     const y = labelMargin + cell.row * stepY
     lines.push(`G0 X${fmt(x)} Y${fmt(y)}`)
-    lines.push(`G1 Z${fmt(p.depth)} F600`)
     lines.push(`M4 S${Math.round(cell.power)}`)
     lines.push(`G1 F${Math.round(cell.speed)}`)
     lines.push(`G1 X${fmt(x + p.squareSize)} Y${fmt(y)}`)
@@ -473,7 +461,6 @@ function buildEngraveGcode() {
     const x = labelMargin + cell.col * stepX
     const y = labelMargin + cell.row * stepY
     lines.push(`G0 X${fmt(x)} Y${fmt(y)}`)
-    lines.push(`G1 Z${fmt(p.depth)} F600`)
     lines.push(`M4 S${Math.round(cell.power)}`)
     for (let yy = y; yy <= y + p.squareSize + 1e-6; yy += p.lineInterval) {
       lines.push(`G1 X${fmt(x + p.squareSize)} Y${fmt(yy)} F${Math.round(cell.speed)}`)
@@ -510,7 +497,6 @@ function loadParams(settings) {
   $('cut-speed-step').value = cut.speedStep
   $('cut-square-size').value = cut.squareSize
   $('cut-gap').value = cut.gap
-  $('cut-depth').value = cut.depth
   const engrave = { ...defaults.engrave, ...(settings?.engrave || {}) }
   $('engrave-cols').value = engrave.cols
   $('engrave-rows').value = engrave.rows
@@ -520,7 +506,6 @@ function loadParams(settings) {
   $('engrave-speed-step').value = engrave.speedStep
   $('engrave-square-size').value = engrave.squareSize
   $('engrave-line-interval').value = engrave.lineInterval
-  $('engrave-depth').value = engrave.depth
 }
 
 function renderPlan() {
@@ -861,7 +846,6 @@ async function startCutGrid() {
       const ox = labelMargin + cell.col * stepX
       const oy = labelMargin + cell.row * stepY
       await call('sendCommand', { command: `G0 X${fmt(ox)} Y${fmt(oy)}` })
-      await call('sendCommand', { command: `G1 Z${fmt(plan.depth)} F600` })
       await call('sendCommand', { command: `M4 S${Math.round(cell.power)}` })
       await call('sendCommand', { command: `G1 F${Math.round(cell.speed)}` })
       await cutSquarePath(ox, oy, plan.squareSize, cell.speed)
@@ -920,7 +904,6 @@ async function startEngraveGrid() {
       const ox = labelMargin + cell.col * stepX
       const oy = labelMargin + cell.row * stepY
       await call('sendCommand', { command: `G0 X${fmt(ox)} Y${fmt(oy)}` })
-      await call('sendCommand', { command: `G1 Z${fmt(plan.depth)} F600` })
       await call('sendCommand', { command: `M4 S${Math.round(cell.power)}` })
       await engraveFilledSquare(ox, oy, plan.squareSize, plan.lineInterval, cell.speed)
       await call('sendCommand', { command: 'M5' })
@@ -1027,7 +1010,7 @@ function activateTab(tab) {
 }
 
 function hookInputs() {
-  for (const id of ['line-length', 'z-step', 'step-count', 'laser-power', 'feed-rate', 'z-feed', 'cut-cols', 'cut-rows', 'cut-power-start', 'cut-power-step', 'cut-speed-start', 'cut-speed-step', 'cut-square-size', 'cut-gap', 'cut-depth', 'engrave-cols', 'engrave-rows', 'engrave-power-start', 'engrave-power-step', 'engrave-speed-start', 'engrave-speed-step', 'engrave-square-size', 'engrave-line-interval', 'engrave-depth']) {
+  for (const id of ['line-length', 'z-step', 'step-count', 'laser-power', 'feed-rate', 'z-feed', 'cut-cols', 'cut-rows', 'cut-power-start', 'cut-power-step', 'cut-speed-start', 'cut-speed-step', 'cut-square-size', 'cut-gap', 'engrave-cols', 'engrave-rows', 'engrave-power-start', 'engrave-power-step', 'engrave-speed-start', 'engrave-speed-step', 'engrave-square-size', 'engrave-line-interval']) {
     $(id).addEventListener('input', () => {
       renderPlan()
       savePlan()

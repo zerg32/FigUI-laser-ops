@@ -10,11 +10,11 @@ Runs a set of parallel lines and lifts Z by a configured amount between each pas
 
 ### Cut grid
 
-Generates a grid of outline squares. Power varies across columns and speed varies across rows.
+Generates a grid of outline squares. Power varies across columns and speed varies across rows. No Z motion.
 
 ### Engrave grid
 
-Generates a grid of filled squares with hatch spacing. Power varies across columns and speed varies across rows.
+Generates a grid of filled squares with hatch spacing. Power varies across columns and speed varies across rows. No Z motion.
 
 ## SD export
 
