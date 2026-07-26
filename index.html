@@ -448,9 +448,16 @@ function buildGridProgram(mode) {
       lines.push(`G1 X${fmt(x)} Y${fmt(y + p.squareSize)}`)
       lines.push(`G1 X${fmt(x)} Y${fmt(y)}`)
     } else {
-      for (let yy = y; yy <= y + p.squareSize + 1e-6; yy += p.lineInterval) {
-        lines.push(`G1 X${fmt(x + p.squareSize)} Y${fmt(yy)} F${Math.round(cell.speed)}`)
-        lines.push(`G1 X${fmt(x)} Y${fmt(yy)} F${Math.round(cell.speed)}`)
+      const steps = Math.max(1, Math.ceil(p.squareSize / p.lineInterval))
+      for (let i = 0; i <= steps; i++) {
+        const yy = y + Math.min(i * p.lineInterval, p.squareSize)
+        const dirRight = i % 2 === 0
+        const xEnd = dirRight ? x + p.squareSize : x
+        lines.push(`G1 X${fmt(xEnd)} Y${fmt(yy)} F${Math.round(cell.speed)}`)
+        if (i < steps) {
+          const nextY = y + Math.min((i + 1) * p.lineInterval, p.squareSize)
+          lines.push(`G0 Y${fmt(nextY)}`)
+        }
       }
     }
     lines.push('M5')
