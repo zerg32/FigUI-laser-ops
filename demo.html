@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Laser Ops Demo</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; width: 100%; height: 100%; }
+  body { font-family: ui-sans-serif, system-ui, sans-serif; background: #0c1018; color: #e2e6f4; }
+  * { box-sizing: border-box; }
+  .app { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100%; }
+  .sidebar { border-right: 1px solid #222840; background: #0f1420; padding: 14px; overflow: auto; }
+  .main { min-width: 0; min-height: 0; overflow: hidden; }
+  .panel { border: 1px solid #222840; background: #111522; border-radius: 14px; overflow: hidden; margin-bottom: 12px; }
+  .panel h2 { margin: 0; padding: 12px 14px; font-size: 14px; border-bottom: 1px solid #222840; }
+  .panel .body { padding: 12px 14px; }
+  .row { display: flex; justify-content: space-between; gap: 10px; align-items: center; margin-bottom: 8px; font-size: 13px; }
+  .btn { border: 1px solid #222840; background: #171c2d; color: #e2e6f4; border-radius: 10px; padding: 8px 10px; cursor: pointer; }
+  .btn.primary { background: #f0a030; color: #111; border: 0; font-weight: 700; }
+  .btn.danger { background: #ef4444; color: #fff; border: 0; }
+  .files { display: grid; gap: 8px; margin-top: 10px; }
+  .file { border: 1px solid #222840; background: #0c1018; border-radius: 10px; padding: 8px 10px; cursor: pointer; }
+  .file.active { outline: 2px solid #f0a030; }
+  .file-name { font-size: 13px; font-weight: 600; }
+  .file-meta { font-size: 12px; color: #6a7898; margin-top: 3px; }
+  .preview { white-space: pre; overflow: auto; max-height: 320px; font-size: 12px; line-height: 1.45; background: #0c1018; border: 1px solid #222840; border-radius: 10px; padding: 10px; }
+  .iframe-wrap { height: 100%; }
+  iframe { width: 100%; height: 100%; border: 0; background: #0c1018; }
+  .hint { color: #6a7898; font-size: 12px; line-height: 1.4; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 14px; border-bottom: 1px solid #222840; background: #111522; }
+  .title { font-weight: 700; }
+  .status { color: #6a7898; font-size: 12px; }
+  @media (max-width: 980px) { .app { grid-template-columns: 1fr; } .sidebar { border-right: 0; border-bottom: 1px solid #222840; } .iframe-wrap { height: 65vh; } }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div>
+      <div class="title">Laser Ops Demo</div>
+      <div class="status" id="status">Emulated SD stored in localStorage</div>
+    </div>
+    <div class="row" style="margin:0">
+      <button class="btn" id="refresh">Refresh files</button>
+      <button class="btn danger" id="clear">Clear SD</button>
+    </div>
+  </div>
+  <div class="app">
+    <div class="sidebar">
+      <div class="panel">
+        <h2>Emulated SD</h2>
+        <div class="body">
+          <div class="hint">Use the save buttons in the plugin. Files written to `/sd/...` are stored here and can be viewed below.</div>
+          <div class="files" id="fileList"></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Selected File</h2>
+        <div class="body">
+          <div class="row"><span id="selectedName">None</span><button class="btn" id="download">Download</button></div>
+          <div class="preview" id="preview">No file selected.</div>
+        </div>
+      </div>
+    </div>
+    <div class="main">
+      <div class="iframe-wrap">
+        <iframe id="plugin" src="./index.html" title="Laser Ops Plugin"></iframe>
+      </div>
+    </div>
+  </div>
+
+<script>
+const SD_KEY = 'laser-ops-demo-sd-v1'
+const SETTINGS_KEY = 'laser-ops-demo-settings-v1'
+const pluginFrame = document.getElementById('plugin')
+const fileList = document.getElementById('fileList')
+const preview = document.getElementById('preview')
+const selectedName = document.getElementById('selectedName')
+let selectedPath = null
+let selectedBlobUrl = null
+
+function loadStore() {
+  try { return JSON.parse(localStorage.getItem(SD_KEY) || '{}') || {} } catch (_) { return {} }
+}
+
+function saveStore(store) {
+  localStorage.setItem(SD_KEY, JSON.stringify(store))
+}
+
+function loadSettings() {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') || {} } catch (_) { return {} }
+}
+
+function saveSettings(data) {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(data || {}))
+}
+
+function normalizePath(path) {
+  if (!path) return ''
+  if (path.startsWith('/sd/')) return path
+  if (path.startsWith('/')) return '/sd' + path
+  return '/sd/' + path
+}
+
+function currentStore() {
+  return loadStore()
+}
+
+function renderFiles() {
+  const store = currentStore()
+  const paths = Object.keys(store).sort()
+  fileList.innerHTML = ''
+  if (!paths.length) {
+    fileList.innerHTML = '<div class="hint">No files saved yet.</div>'
+  }
+  for (const path of paths) {
+    const item = document.createElement('div')
+    item.className = 'file' + (path === selectedPath ? ' active' : '')
+    const content = store[path] || ''
+    item.innerHTML = `<div class="file-name">${path.replace(/^\/sd\//, '')}</div><div class="file-meta">${content.length} bytes</div>`
+    item.onclick = () => selectFile(path)
+    fileList.appendChild(item)
+  }
+  if (selectedPath && store[selectedPath] == null) {
+    selectedPath = null
+    preview.textContent = 'No file selected.'
+    selectedName.textContent = 'None'
+  }
+}
+
+function selectFile(path) {
+  const store = currentStore()
+  selectedPath = path
+  const content = store[path] || ''
+  if (selectedBlobUrl) URL.revokeObjectURL(selectedBlobUrl)
+  selectedBlobUrl = URL.createObjectURL(new Blob([content], { type: 'text/plain' }))
+  selectedName.textContent = path.replace(/^\/sd\//, '')
+  preview.textContent = content || '(empty file)'
+  renderFiles()
+}
+
+document.getElementById('refresh').onclick = renderFiles
+document.getElementById('clear').onclick = () => {
+  localStorage.removeItem(SD_KEY)
+  selectedPath = null
+  preview.textContent = 'No file selected.'
+  selectedName.textContent = 'None'
+  renderFiles()
+}
+document.getElementById('download').onclick = () => {
+  if (!selectedPath) return
+  const store = currentStore()
+  const content = store[selectedPath] || ''
+  const blob = new Blob([content], { type: 'text/plain' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = selectedPath.replace(/^\/sd\//, '')
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+window.addEventListener('message', event => {
+  const data = event.data || {}
+  if (data.type !== 'fluid-request') return
+
+  const reply = result => pluginFrame.contentWindow.postMessage({ type: 'fluid-response', id: data.id, result }, '*')
+  const fail = error => pluginFrame.contentWindow.postMessage({ type: 'fluid-response', id: data.id, error: String(error) }, '*')
+
+  try {
+    if (data.method === 'getSettings') return reply(loadSettings())
+    if (data.method === 'saveSettings') { saveSettings(data.params?.data || {}); return reply({ ok: true }) }
+    if (data.method === 'getStatus') return reply({ state: 'Idle', wpos: { x: 0, y: 0, z: 0 }, mpos: { x: 0, y: 0, z: 0 } })
+    if (data.method === 'sendCommand' || data.method === 'sendRealtime') return reply({ ok: true })
+    if (data.method === 'writeFile') {
+      const path = normalizePath(data.params?.path)
+      const store = currentStore()
+      store[path] = String(data.params?.content ?? '')
+      saveStore(store)
+      renderFiles()
+      if (!selectedPath) selectFile(path)
+      return reply({ ok: true, path })
+    }
+    if (data.method === 'readFile') {
+      const path = normalizePath(data.params?.path)
+      const store = currentStore()
+      return reply(store[path] ?? '')
+    }
+    if (data.method === 'listFiles') {
+      const store = currentStore()
+      return reply({ files: Object.keys(store).sort().map(name => ({ name: name.replace(/^\/sd\//, ''), size: (store[name] || '').length, isDir: false })) })
+    }
+    return reply({ ok: true })
+  } catch (err) {
+    fail(err.message || err)
+  }
+})
+
+pluginFrame.addEventListener('load', () => setTimeout(renderFiles, 100))
+renderFiles()
+</script>
+</body>
+</html>
