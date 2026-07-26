@@ -1,10 +1,20 @@
 # Laser Ops
 
-FigUI plugin for FluidNC laser focus testing.
+FigUI plugin for FluidNC laser testing.
 
-## Focus test
+## Modes
+
+### Focus test
 
 Runs a set of parallel lines and lifts Z by a configured amount between each pass.
+
+### Cut grid
+
+Generates a grid of outline squares. Power varies across columns and speed varies across rows.
+
+### Engrave grid
+
+Generates a grid of filled squares with hatch spacing. Power varies across columns and speed varies across rows.
 
 ### Parameters
 
