@@ -1,0 +1,10 @@
+{
+  "name": "Laser Ops",
+  "description": "Generate stepped laser focus-test patterns for FluidNC machines.",
+  "version": "1.0.0",
+  "entry": "index.html",
+  "layout": "full",
+  "layoutTablet": "full",
+  "layoutMobile": "full",
+  "files": ["index.html", "style.css"]
+}

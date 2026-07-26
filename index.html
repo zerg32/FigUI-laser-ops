@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Laser Ops</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="shell">
+  <div class="topbar">
+    <div class="title-wrap">
+      <div class="title">Laser Ops</div>
+      <div class="subtitle">Focus test: burn parallel lines while stepping Z upward between passes.</div>
+    </div>
+    <div class="status-pill"><span id="status-dot" class="status-dot"></span><span id="status-text">Disconnected</span></div>
+  </div>
+
+  <div class="content">
+    <div class="sidebar">
+      <div class="panel">
+        <div class="panel-hd"><div class="panel-title">Focus Pattern</div></div>
+        <div class="panel-body">
+          <div class="param-row">
+            <span class="param-label">Line length</span>
+            <div class="param-controls"><input id="line-length" class="param-input" type="number" min="1" step="0.1" value="40"><span class="param-unit">mm</span></div>
+          </div>
+          <div class="param-row">
+            <span class="param-label">Z step</span>
+            <div class="param-controls"><input id="z-step" class="param-input" type="number" min="0.001" step="0.001" value="0.25"><span class="param-unit">mm</span></div>
+          </div>
+          <div class="param-row">
+            <span class="param-label">Number of steps</span>
+            <div class="param-controls"><input id="step-count" class="param-input narrow" type="number" min="1" step="1" value="5"><span class="param-unit">passes</span></div>
+          </div>
+          <div class="param-row">
+            <span class="param-label">Laser power</span>
+            <div class="param-controls"><input id="laser-power" class="param-input" type="number" min="0" step="1" value="100"><span class="param-unit">S</span></div>
+          </div>
+          <div class="param-row">
+            <span class="param-label">Feed rate</span>
+            <div class="param-controls"><input id="feed-rate" class="param-input" type="number" min="1" step="1" value="1200"><span class="param-unit">mm/min</span></div>
+          </div>
+          <div class="param-row">
+            <span class="param-label">Z feed</span>
+            <div class="param-controls"><input id="z-feed" class="param-input" type="number" min="1" step="1" value="600"><span class="param-unit">mm/min</span></div>
+          </div>
+          <div class="param-row">
+            <span class="param-label">Safe Z</span>
+            <div class="param-controls"><input id="safe-z" class="param-input" type="number" min="0" step="0.1" value="5"><span class="param-unit">mm</span></div>
+          </div>
+
+          <div class="hint">
+            Put the machine at the intended work zero before starting. The plugin assumes the CNC is already zeroed and uses absolute work coordinates from there.
+            Line spacing is auto-derived from the chosen line length and step count.
+          </div>
+
+          <div class="action-bar">
+            <button id="start-btn" class="primary-btn">Start Focus Test</button>
+            <button id="abort-btn" class="danger-btn" style="display:none">Abort</button>
+            <button id="reset-btn" class="secondary-btn" style="display:none">Reset</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-hd"><div class="panel-title">Passes</div><div id="plan-summary" class="pass-value">0 passes</div></div>
+        <div class="panel-body">
+          <div id="pass-list" class="progress-list"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-hd"><div class="panel-title">Results</div></div>
+        <div class="panel-body">
+          <div id="results" class="results">
+            <div class="result-line"><span class="result-label">Ready</span><span class="result-value">Set parameters and start</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="preview">
+      <div class="preview-panel">
+        <div class="panel" style="height:100%">
+          <div class="panel-hd"><div class="panel-title">Preview</div><div id="plan-detail" class="pass-value">No plan yet</div></div>
+          <div class="panel-body" style="height:100%; min-height:0; padding-top:0">
+            <div class="preview-canvas-wrap"><canvas id="preview" class="preview-canvas"></canvas></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+let msgId = 0
+const pending = {}
+const state = {
+  machineState: 'Disconnected',
+  running: false,
+  abort: false,
+  plan: null,
+  saveTimer: null,
+}
+
+const defaults = {
+  lineLength: 40,
+  zStep: 0.25,
+  stepCount: 5,
+  laserPower: 100,
+  feedRate: 1200,
+  zFeed: 600,
+  safeZ: 5,
+}
+
+function call(method, params) {
+  return new Promise((resolve, reject) => {
+    const id = String(++msgId)
+    pending[id] = { resolve, reject }
+    window.parent.postMessage({ type: 'fluid-request', id, method, params: params ?? {} }, '*')
+  })
+}
+
+window.addEventListener('message', e => {
+  if (e.data?.type === 'fluid-response') {
+    const p = pending[e.data.id]
+    if (p) {
+      delete pending[e.data.id]
+      e.data.error ? p.reject(new Error(e.data.error)) : p.resolve(e.data.result)
+    }
+  }
+  if (e.data?.type === 'fluid-event' && e.data.event === 'status') {
+    applyStatus(e.data.data)
+  }
+})
+
+function $(id) { return document.getElementById(id) }
+function num(id, fallback) {
+  const v = parseFloat($(id).value)
+  return Number.isFinite(v) ? v : fallback
+}
+
+function clamp(v, min, max) {
+  return Math.min(max, Math.max(min, v))
+}
+
+function fmt(v) {
+  return Number(v).toFixed(3)
+}
+
+function toast(msg, kind = 'ok') {
+  const el = $('toast')
+  el.textContent = msg
+  el.className = `toast show ${kind}`
+  clearTimeout(toast._t)
+  toast._t = setTimeout(() => { el.className = 'toast' }, 2500)
+}
+
+function setStatus(text, kind) {
+  $('status-text').textContent = text
+  $('status-dot').className = `status-dot ${kind}`
+}
+
+function applyStatus(s) {
+  if (!s) return
+  state.machineState = s.state || state.machineState
+  if (state.machineState === 'Idle') setStatus('Idle', 'idle')
+  else if (state.machineState === 'Run' || state.machineState === 'Jog') setStatus(state.machineState, 'run')
+  else if (state.machineState === 'Alarm') setStatus('Alarm', 'alarm')
+  else setStatus(state.machineState || 'Connected', '')
+}
+
+function readParams() {
+  const lineLength = Math.max(0.001, num('line-length', defaults.lineLength))
+  const zStep = Math.max(0.001, Math.abs(num('z-step', defaults.zStep)))
+  const stepCount = Math.max(1, Math.round(num('step-count', defaults.stepCount)))
+  const laserPower = Math.max(0, num('laser-power', defaults.laserPower))
+  const feedRate = Math.max(1, num('feed-rate', defaults.feedRate))
+  const zFeed = Math.max(1, num('z-feed', defaults.zFeed))
+  const safeZ = Math.max(0, num('safe-z', defaults.safeZ))
+  const linePitch = stepCount > 1 ? clamp(lineLength / stepCount, 1, 20) : 0
+
+  return { lineLength, zStep, stepCount, laserPower, feedRate, zFeed, safeZ, linePitch }
+}
+
+function buildPlan() {
+  const p = readParams()
+  const passes = []
+  for (let i = 0; i < p.stepCount; i++) {
+    const y = i * p.linePitch
+    const z = i * p.zStep
+    const reverse = i % 2 === 1
+    passes.push({
+      index: i,
+      label: `Pass ${i + 1}`,
+      y,
+      z,
+      startX: reverse ? p.lineLength : 0,
+      endX: reverse ? 0 : p.lineLength,
+      reverse,
+    })
+  }
+  return { ...p, passes }
+}
+
+function savePlan() {
+  clearTimeout(state.saveTimer)
+  state.saveTimer = setTimeout(async () => {
+    try {
+      await call('saveSettings', { data: readParams() })
+    } catch (_) {}
+  }, 250)
+}
+
+function loadParams(settings) {
+  const s = { ...defaults, ...(settings || {}) }
+  $('line-length').value = s.lineLength
+  $('z-step').value = s.zStep
+  $('step-count').value = s.stepCount
+  $('laser-power').value = s.laserPower
+  $('feed-rate').value = s.feedRate
+  $('z-feed').value = s.zFeed
+  $('safe-z').value = s.safeZ
+}
+
+function renderPlan() {
+  const plan = buildPlan()
+  state.plan = plan
+  $('plan-summary').textContent = `${plan.stepCount} passes`
+  $('plan-detail').textContent = `Length ${fmt(plan.lineLength)} mm, pitch ${fmt(plan.linePitch)} mm, Z step ${fmt(plan.zStep)} mm`
+  $('pass-list').innerHTML = plan.passes.map(p => `
+    <div class="pass-row pending" id="pass-${p.index}">
+      <div class="pass-dot"></div>
+      <div class="pass-main">
+        <div class="pass-title">${p.label}</div>
+        <div class="pass-meta">${p.reverse ? 'Right to left' : 'Left to right'} · Y ${fmt(p.y)} · Z ${fmt(p.z)}</div>
+      </div>
+      <div class="pass-value">${fmt(p.z)} mm</div>
+    </div>
+  `).join('')
+  drawPreview()
+}
+
+function setPassState(index, kind, value) {
+  const row = $(`pass-${index}`)
+  if (!row) return
+  row.className = `pass-row ${kind}`
+  const valueEl = row.querySelector('.pass-value')
+  if (valueEl && value !== undefined) valueEl.textContent = value
+}
+
+function drawPreview(activeIndex = -1) {
+  const canvas = $('preview')
+  const wrap = canvas.parentElement
+  const w = wrap.clientWidth || 320
+  const h = wrap.clientHeight || 320
+  const dpr = window.devicePixelRatio || 1
+  canvas.width = Math.max(1, Math.floor(w * dpr))
+  canvas.height = Math.max(1, Math.floor(h * dpr))
+  canvas.style.width = `${w}px`
+  canvas.style.height = `${h}px`
+
+  const ctx = canvas.getContext('2d')
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  ctx.clearRect(0, 0, w, h)
+
+  const plan = state.plan || buildPlan()
+  const pad = 24
+  const area = {
+    x: pad,
+    y: pad,
+    w: Math.max(50, w - pad * 2),
+    h: Math.max(50, h - pad * 2),
+  }
+  const maxZ = Math.max(1, plan.stepCount > 1 ? (plan.stepCount - 1) * plan.zStep : 1)
+
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--border-strong').trim() || 'rgba(255,255,255,0.15)'
+  ctx.fillStyle = 'rgba(255,255,255,0.04)'
+  ctx.lineWidth = 1
+  ctx.beginPath()
+  ctx.roundRect(area.x, area.y, area.w, area.h, 14)
+  ctx.fill()
+  ctx.stroke()
+
+  const left = area.x + 28
+  const right = area.x + area.w - 28
+  const top = area.y + 20
+  const bottom = area.y + area.h - 30
+  const usableH = bottom - top
+
+  for (const p of plan.passes) {
+    const t = plan.passes.length === 1 ? 0.5 : p.index / (plan.passes.length - 1)
+    const y = top + t * usableH
+    const zLabel = `Z ${fmt(p.z)}`
+    ctx.strokeStyle = p.index === activeIndex ? 'rgba(240,160,48,1)' : 'rgba(226,230,244,0.65)'
+    ctx.lineWidth = p.index === activeIndex ? 4 : 2
+    ctx.beginPath()
+    ctx.moveTo(left, y)
+    ctx.lineTo(right, y)
+    ctx.stroke()
+
+    ctx.fillStyle = p.index === activeIndex ? 'rgba(240,160,48,1)' : 'rgba(226,230,244,0.85)'
+    ctx.font = '12px ui-sans-serif, system-ui, sans-serif'
+    ctx.fillText(zLabel, left, y - 7)
+    ctx.fillText(p.reverse ? 'R' : 'L', right + 8, y + 4)
+  }
+
+  ctx.fillStyle = 'rgba(240,160,48,0.18)'
+  ctx.fillRect(left, top - 8, right - left, 1)
+  ctx.fillStyle = 'rgba(240,160,48,0.22)'
+  ctx.fillRect(left, bottom + 7, right - left, 1)
+
+  ctx.fillStyle = 'rgba(106,120,152,0.95)'
+  ctx.font = '12px ui-sans-serif, system-ui, sans-serif'
+  ctx.fillText(`Length ${fmt(plan.lineLength)} mm`, left, bottom + 24)
+  ctx.fillText(`Pitch ${fmt(plan.linePitch)} mm`, left + 160, bottom + 24)
+  ctx.fillText(`Z span ${fmt(maxZ)} mm`, left + 280, bottom + 24)
+}
+
+async function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+async function startFocus() {
+  const plan = buildPlan()
+  state.plan = plan
+  renderPlan()
+
+  if (state.running) return
+  if (state.machineState === 'Alarm') {
+    toast('Clear alarm before starting', 'err')
+    return
+  }
+  if (state.machineState && state.machineState !== 'Idle' && state.machineState !== 'Connected') {
+    toast('Machine must be idle before starting', 'warn')
+    return
+  }
+
+  state.running = true
+  state.abort = false
+  $('start-btn').style.display = 'none'
+  $('abort-btn').style.display = ''
+  $('reset-btn').style.display = 'none'
+  $('results').innerHTML = '<div class="result-line"><span class="result-label">Status</span><span class="result-value">Running focus test</span></div>'
+
+  try {
+    await call('sendCommand', { command: 'G90 G21' })
+    await call('sendCommand', { command: 'M5' })
+    await call('sendCommand', { command: `G1 Z${fmt(plan.safeZ)} F${fmt(plan.zFeed)}` })
+    await call('sendCommand', { command: 'G0 X0 Y0' })
+
+    for (const pass of plan.passes) {
+      if (state.abort) throw new Error('Aborted')
+      setPassState(pass.index, 'active', `Z ${fmt(pass.z)} mm`)
+      drawPreview(pass.index)
+
+      await call('sendCommand', { command: `G0 X${fmt(pass.startX)} Y${fmt(pass.y)}` })
+      await call('sendCommand', { command: `G1 Z${fmt(pass.z)} F${fmt(plan.zFeed)}` })
+      await call('sendCommand', { command: `M4 S${Math.round(plan.laserPower)}` })
+      await call('sendCommand', { command: `G1 X${fmt(pass.endX)} F${fmt(plan.feedRate)}` })
+      await call('sendCommand', { command: 'M5' })
+      await call('sendCommand', { command: `G1 Z${fmt(plan.safeZ)} F${fmt(plan.zFeed)}` })
+
+      setPassState(pass.index, 'done', `Z ${fmt(pass.z)} mm`)
+      if (pass.index === plan.passes.length - 1) break
+      await wait(25)
+    }
+
+    $('results').innerHTML = `
+      <div class="result-line"><span class="result-label">Passes</span><span class="result-value">${plan.stepCount}</span></div>
+      <div class="result-line"><span class="result-label">Line length</span><span class="result-value">${fmt(plan.lineLength)} mm</span></div>
+      <div class="result-line"><span class="result-label">Z step</span><span class="result-value">${fmt(plan.zStep)} mm</span></div>
+      <div class="result-line"><span class="result-label">Auto pitch</span><span class="result-value">${fmt(plan.linePitch)} mm</span></div>
+    `
+    toast('Focus pattern complete', 'ok')
+  } catch (err) {
+    if (state.abort) toast('Aborted', 'warn')
+    else toast(err.message || 'Focus test failed', 'err')
+    try { await call('sendCommand', { command: 'M5' }) } catch (_) {}
+    try { await call('sendCommand', { command: `G1 Z${fmt(plan.safeZ)} F${fmt(plan.zFeed)}` }) } catch (_) {}
+    $('results').innerHTML = `
+      <div class="result-line"><span class="result-label">Stopped</span><span class="result-value">${err.message || 'Error'}</span></div>
+    `
+  } finally {
+    state.running = false
+    $('abort-btn').style.display = 'none'
+    $('reset-btn').style.display = ''
+    $('start-btn').style.display = ''
+    drawPreview()
+  }
+}
+
+function abortFocus() {
+  state.abort = true
+  call('sendRealtime', { byte: 0x18 }).catch(() => {})
+  toast('Aborting...', 'warn')
+}
+
+function resetView() {
+  state.abort = false
+  renderPlan()
+  $('results').innerHTML = '<div class="result-line"><span class="result-label">Ready</span><span class="result-value">Set parameters and start</span></div>'
+  $('reset-btn').style.display = 'none'
+}
+
+function hookInputs() {
+  for (const id of ['line-length', 'z-step', 'step-count', 'laser-power', 'feed-rate', 'z-feed', 'safe-z']) {
+    $(id).addEventListener('input', () => {
+      renderPlan()
+      savePlan()
+    })
+  }
+  $('start-btn').addEventListener('click', startFocus)
+  $('abort-btn').addEventListener('click', abortFocus)
+  $('reset-btn').addEventListener('click', resetView)
+  window.addEventListener('resize', () => drawPreview())
+}
+
+async function init() {
+  hookInputs()
+  try {
+    const settings = await call('getSettings')
+    loadParams(settings)
+  } catch (_) {
+    loadParams(defaults)
+  }
+  renderPlan()
+  try {
+    const status = await call('getStatus')
+    applyStatus(status)
+  } catch (_) {}
+}
+
+init()
+</script>
+
+</body>
+</html>
