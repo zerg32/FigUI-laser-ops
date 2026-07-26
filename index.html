@@ -394,8 +394,8 @@ function textStrokeCommandsRight(text, rightEdge, y, scale, feed) {
   return textStrokeCommands(text, rightEdge - width, y, scale, feed)
 }
 
-const GRID_GUTTER_X = 70
-const GRID_GUTTER_Y = 28
+const GRID_GUTTER_X = 24
+const GRID_GUTTER_Y = 14
 
 function buildFocusGcode() {
   const p = buildPlan()
@@ -431,14 +431,14 @@ function buildGridProgram(mode) {
     lines.push('M5')
   }
   for (let row = 0; row < p.rows; row++) {
-    const y = labelMarginY + (p.rows - 1 - row) * stepY + p.squareSize * 0.6
+    const y = labelMarginY + row * stepY + p.squareSize * 0.6
     lines.push('M5', `M4 S${labelPower}`)
     lines.push(...textStrokeCommandsRight(compactValue(p.speedStart + row * p.speedStep), labelMarginX - 2, y, 0.75, 1200))
     lines.push('M5')
   }
   for (const cell of p.cells) {
     const x = labelMarginX + cell.col * stepX
-    const y = labelMarginY + (p.rows - 1 - cell.row) * stepY
+    const y = labelMarginY + cell.row * stepY
     lines.push(`G0 X${fmt(x)} Y${fmt(y)}`)
     lines.push(`M4 S${Math.round(cell.power)}`)
     lines.push(`G1 F${Math.round(cell.speed)}`)
@@ -666,10 +666,22 @@ function drawGridPreview(mode, activeCell = null) {
   }
   for (let row = 0; row < plan.rows; row++) {
     const v = compactValue(plan.speedStart + row * plan.speedStep)
-    const y = gridY + (plan.rows - 1 - row) * (square + gap) + square * 0.58
+    const y = gridY + row * (square + gap) + square * 0.58
     ctx.strokeStyle = 'rgba(226,230,244,0.85)'
     drawTextStroke(ctx, v, gridX - 40, y, textScale, 1.2)
   }
+
+  ctx.strokeStyle = 'rgba(34,197,94,0.95)'
+  ctx.fillStyle = 'rgba(34,197,94,0.95)'
+  ctx.lineWidth = 2
+  ctx.beginPath()
+  ctx.moveTo(ox - 6, oy)
+  ctx.lineTo(ox + 6, oy)
+  ctx.moveTo(ox, oy - 6)
+  ctx.lineTo(ox, oy + 6)
+  ctx.stroke()
+  ctx.font = '12px ui-sans-serif, system-ui, sans-serif'
+  ctx.fillText('(0,0)', ox + 10, oy - 8)
 
   ctx.fillStyle = 'rgba(106,120,152,0.95)'
   ctx.fillText(mode === 'cut' ? 'Cut squares' : 'Filled engrave squares', gridX + plan.totalW * scale * 0.5 - 40, h - 12)
