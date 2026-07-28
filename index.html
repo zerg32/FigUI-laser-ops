@@ -414,23 +414,28 @@ function rectMarkerSegments(p) {
   const diagLen = m * 0.7
   const perpLen = m * 0.55
   return [
-    { x: 0, y: 0, sx: 1, sy: 1, dx: diagLen, dy: diagLen },
-    { x: p.width, y: 0, sx: -1, sy: 1, dx: -diagLen, dy: diagLen },
-    { x: p.width, y: p.height, sx: -1, sy: -1, dx: -diagLen, dy: -diagLen },
-    { x: 0, y: p.height, sx: 1, sy: -1, dx: diagLen, dy: -diagLen },
-  ].map(corner => {
-    const perpX = -corner.sy
-    const perpY = corner.sx
+    { x: 0, y: 0, sx: 1, sy: 1 },
+    { x: p.width, y: 0, sx: -1, sy: 1 },
+    { x: p.width, y: p.height, sx: -1, sy: -1 },
+    { x: 0, y: p.height, sx: 1, sy: -1 },
+  ].flatMap(corner => {
+    const diagX = corner.sx * p.width
+    const diagY = corner.sy * p.height
+    const diagMag = Math.hypot(diagX, diagY) || 1
+    const ux = diagX / diagMag
+    const uy = diagY / diagMag
+    const px = -uy
+    const py = ux
     return [
       // Two short rectangle sides meeting at the corner.
       [[corner.x, corner.y], [corner.x + corner.sx * m, corner.y]],
       [[corner.x, corner.y], [corner.x, corner.y + corner.sy * m]],
-      // Short diagonal piece leaving the corner.
-      [[corner.x, corner.y], [corner.x + corner.dx, corner.y + corner.dy]],
+      // Short diagonal piece leaving the corner along the rectangle diagonal.
+      [[corner.x, corner.y], [corner.x + ux * diagLen, corner.y + uy * diagLen]],
       // Short perpendicular tick crossing the diagonal at the corner.
-      [[corner.x - perpX * perpLen * 0.5, corner.y - perpY * perpLen * 0.5], [corner.x + perpX * perpLen * 0.5, corner.y + perpY * perpLen * 0.5]],
+      [[corner.x - px * perpLen * 0.5, corner.y - py * perpLen * 0.5], [corner.x + px * perpLen * 0.5, corner.y + py * perpLen * 0.5]],
     ]
-  }).flat()
+  })
 }
 
 function laserToolProgramLines(tool) {
