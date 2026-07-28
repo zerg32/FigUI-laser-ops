@@ -105,6 +105,14 @@
               <span class="param-label">Gap</span>
               <div class="param-controls"><input id="cut-gap" class="param-input" type="number" min="0" step="0.1" value="3"><span class="param-unit">mm</span></div>
             </div>
+            <div class="param-row">
+              <span class="param-label">Label power</span>
+              <div class="param-controls"><input id="cut-label-power" class="param-input" type="number" min="0" step="1" value="15"><span class="param-unit">S</span></div>
+            </div>
+            <div class="param-row">
+              <span class="param-label">Label speed</span>
+              <div class="param-controls"><input id="cut-label-speed" class="param-input" type="number" min="1" step="1" value="1200"><span class="param-unit">mm/min</span></div>
+            </div>
             <div class="hint">
               Each cell is a cut-only square. Power is varied across columns and speed is varied across rows.
             </div>
@@ -146,6 +154,14 @@
             <div class="param-row">
               <span class="param-label">Line interval</span>
               <div class="param-controls"><input id="engrave-line-interval" class="param-input" type="number" min="0.1" step="0.1" value="0.5"><span class="param-unit">mm</span></div>
+            </div>
+            <div class="param-row">
+              <span class="param-label">Label power</span>
+              <div class="param-controls"><input id="engrave-label-power" class="param-input" type="number" min="0" step="1" value="15"><span class="param-unit">S</span></div>
+            </div>
+            <div class="param-row">
+              <span class="param-label">Label speed</span>
+              <div class="param-controls"><input id="engrave-label-speed" class="param-input" type="number" min="1" step="1" value="1200"><span class="param-unit">mm/min</span></div>
             </div>
             <div class="hint">
               Each cell is an engraved fill square. Power is varied across columns and speed is varied across rows.
@@ -249,6 +265,8 @@ const defaults = {
     speedStep: 300,
     squareSize: 12,
     gap: 3,
+    labelPower: 15,
+    labelSpeed: 1200,
   },
   engrave: {
     cols: 5,
@@ -259,6 +277,8 @@ const defaults = {
     speedStep: 300,
     squareSize: 12,
     lineInterval: 0.5,
+    labelPower: 15,
+    labelSpeed: 1200,
   },
   rect: {
     width: 40,
@@ -348,6 +368,8 @@ function readGridParams(prefix) {
     speedStart: Math.max(1, num(`${prefix}-speed-start`, defaults[prefix].speedStart)),
     speedStep: Math.max(0, num(`${prefix}-speed-step`, defaults[prefix].speedStep)),
     squareSize: Math.max(1, num(`${prefix}-square-size`, defaults[prefix].squareSize)),
+    labelPower: Math.max(0, num(`${prefix}-label-power`, defaults[prefix].labelPower)),
+    labelSpeed: Math.max(1, num(`${prefix}-label-speed`, defaults[prefix].labelSpeed)),
   }
   if (prefix === 'cut') base.gap = Math.max(0, num('cut-gap', defaults.cut.gap))
   if (prefix === 'engrave') base.lineInterval = Math.max(0.05, num('engrave-line-interval', defaults.engrave.lineInterval))
@@ -469,23 +491,28 @@ function fileNameForMode(mode) {
   return `laser-ops-${mode}-${safeFileStamp()}.nc`
 }
 
-function textStrokeCommands(text, x, y, scale, feed) {
+function textStrokeCommands(text, x, y, scale, feed, mirrorX = false, mirrorY = false) {
   const lines = []
+  const chars = mirrorX ? [...String(text)].reverse() : [...String(text)]
   let cursor = x
-  for (const ch of String(text)) {
+  for (const ch of chars) {
     const glyph = fontGlyph(ch)
     for (const seg of glyph) {
-      lines.push(`G0 X${fmt(cursor + seg[0] * scale)} Y${fmt(y + seg[1] * scale)}`)
-      lines.push(`G1 X${fmt(cursor + seg[2] * scale)} Y${fmt(y + seg[3] * scale)} F${Math.round(feed)}`)
+      const x0 = mirrorX ? cursor + (4 - seg[0]) * scale : cursor + seg[0] * scale
+      const x1 = mirrorX ? cursor + (4 - seg[2]) * scale : cursor + seg[2] * scale
+      const y0 = mirrorY ? y + (6 - seg[1]) * scale : y + seg[1] * scale
+      const y1 = mirrorY ? y + (6 - seg[3]) * scale : y + seg[3] * scale
+      lines.push(`G0 X${fmt(x0)} Y${fmt(y0)}`)
+      lines.push(`G1 X${fmt(x1)} Y${fmt(y1)} F${Math.round(feed)}`)
     }
     cursor += 6 * scale
   }
   return lines
 }
 
-function textStrokeCommandsRight(text, rightEdge, y, scale, feed) {
+function textStrokeCommandsRight(text, rightEdge, y, scale, feed, mirrorX = false, mirrorY = false) {
   const width = String(text).length * 6 * scale
-  return textStrokeCommands(text, rightEdge - width, y, scale, feed)
+  return textStrokeCommands(text, rightEdge - width, y, scale, feed, mirrorX, mirrorY)
 }
 
 const GRID_GUTTER_X = 24
@@ -519,17 +546,18 @@ function buildGridProgram(mode) {
   const stepY = p.squareSize + p.gap
   const labelMarginX = GRID_GUTTER_X
   const labelMarginY = GRID_GUTTER_Y
-  const labelPower = 15
+  const labelPower = p.labelPower
+  const labelSpeed = p.labelSpeed
   for (let col = 0; col < p.cols; col++) {
     const x = labelMarginX + col * stepX
     lines.push('M5', `M4 S${labelPower}`)
-    lines.push(...textStrokeCommands(compactValue(p.powerStart + col * p.powerStep), x, labelMarginY - 10, 0.75, 1200))
+    lines.push(...textStrokeCommands(compactValue(p.powerStart + col * p.powerStep), x, labelMarginY - 10, 0.75, labelSpeed, false, true))
     lines.push('M5')
   }
   for (let row = 0; row < p.rows; row++) {
     const y = labelMarginY + row * stepY + p.squareSize * 0.6
     lines.push('M5', `M4 S${labelPower}`)
-    lines.push(...textStrokeCommandsRight(compactValue(p.speedStart + row * p.speedStep), labelMarginX - 2, y, 0.75, 1200))
+    lines.push(...textStrokeCommandsRight(compactValue(p.speedStart + row * p.speedStep), labelMarginX - 2, y, 0.75, labelSpeed, false, true))
     lines.push('M5')
   }
   for (const cell of p.cells) {
@@ -620,6 +648,8 @@ function loadParams(settings) {
   $('cut-speed-step').value = cut.speedStep
   $('cut-square-size').value = cut.squareSize
   $('cut-gap').value = cut.gap
+  $('cut-label-power').value = cut.labelPower
+  $('cut-label-speed').value = cut.labelSpeed
   const engrave = { ...defaults.engrave, ...(settings?.engrave || {}) }
   $('engrave-cols').value = engrave.cols
   $('engrave-rows').value = engrave.rows
@@ -629,6 +659,8 @@ function loadParams(settings) {
   $('engrave-speed-step').value = engrave.speedStep
   $('engrave-square-size').value = engrave.squareSize
   $('engrave-line-interval').value = engrave.lineInterval
+  $('engrave-label-power').value = engrave.labelPower
+  $('engrave-label-speed').value = engrave.labelSpeed
   const rect = { ...defaults.rect, ...(settings?.rect || {}) }
   $('rect-width').value = rect.width
   $('rect-height').value = rect.height
@@ -797,9 +829,10 @@ function drawGridPreview(mode, activeCell = null) {
   ctx.restore()
 
   for (const cell of plan.cells) {
+    const visualRow = plan.rows - 1 - cell.row
     const origin = {
       x: gridX + cell.col * (square + gap),
-      y: gridY + cell.row * (square + gap),
+      y: gridY + visualRow * (square + gap),
     }
     ctx.fillStyle = cell === activeCell ? 'rgba(240,160,48,0.22)' : 'rgba(255,255,255,0.03)'
     ctx.strokeStyle = cell === activeCell ? 'rgba(240,160,48,1)' : 'rgba(226,230,244,0.6)'
@@ -814,11 +847,11 @@ function drawGridPreview(mode, activeCell = null) {
     const v = compactValue(plan.powerStart + col * plan.powerStep)
     const x = gridX + col * (square + gap)
     ctx.strokeStyle = 'rgba(226,230,244,0.85)'
-    drawTextStroke(ctx, v, x + 1, gridY - 12, textScale, 1.2)
+    drawTextStroke(ctx, v, x + 1, gridY + plan.totalH * scale + 16, textScale, 1.2)
   }
   for (let row = 0; row < plan.rows; row++) {
     const v = compactValue(plan.speedStart + row * plan.speedStep)
-    const y = gridY + row * (square + gap) + square * 0.58
+    const y = gridY + (plan.rows - 1 - row) * (square + gap) + square * 0.58
     ctx.strokeStyle = 'rgba(226,230,244,0.85)'
     drawTextStroke(ctx, v, gridX - 40, y, textScale, 1.2)
   }
@@ -826,14 +859,15 @@ function drawGridPreview(mode, activeCell = null) {
   ctx.strokeStyle = 'rgba(34,197,94,0.95)'
   ctx.fillStyle = 'rgba(34,197,94,0.95)'
   ctx.lineWidth = 2
+  const originY = gridY + plan.totalH * scale
   ctx.beginPath()
-  ctx.moveTo(ox - 6, oy)
-  ctx.lineTo(ox + 6, oy)
-  ctx.moveTo(ox, oy - 6)
-  ctx.lineTo(ox, oy + 6)
+  ctx.moveTo(ox - 6, originY)
+  ctx.lineTo(ox + 6, originY)
+  ctx.moveTo(ox, originY - 6)
+  ctx.lineTo(ox, originY + 6)
   ctx.stroke()
   ctx.font = '12px ui-sans-serif, system-ui, sans-serif'
-  ctx.fillText('(0,0)', ox + 10, oy - 8)
+  ctx.fillText('(0,0)', ox + 10, originY - 8)
 
   ctx.fillStyle = 'rgba(106,120,152,0.95)'
   ctx.fillText(mode === 'cut' ? 'Cut squares' : 'Filled engrave squares', gridX + plan.totalW * scale * 0.5 - 40, h - 12)
@@ -1165,47 +1199,57 @@ function compactValue(v) {
 }
 
 async function engraveGridLabels(mode, plan, originX, originY) {
-  const labelPower = 15
-  const labelFeed = 900
+  const labelPower = plan.labelPower
+  const labelFeed = plan.labelSpeed
   const size = 0.75
   const gap = plan.gap ?? 3
   const topY = originY - 10
   const leftX = originX - 2
   for (let col = 0; col < plan.cols; col++) {
     const x = originX + col * (plan.squareSize + gap)
-    await drawStrokeGcodeTop(compactValue(plan.powerStart + col * plan.powerStep), x, topY, size, labelFeed, labelPower)
+    await drawStrokeGcodeTop(compactValue(plan.powerStart + col * plan.powerStep), x, topY, size, labelFeed, labelPower, false, true)
   }
   for (let row = 0; row < plan.rows; row++) {
     const y = originY + row * (plan.squareSize + gap) + plan.squareSize * 0.6
-    await drawStrokeGcodeLeft(compactValue(plan.speedStart + row * plan.speedStep), leftX, y, size, labelFeed, labelPower)
+    await drawStrokeGcodeLeft(compactValue(plan.speedStart + row * plan.speedStep), leftX, y, size, labelFeed, labelPower, false, true)
   }
 }
 
-async function drawStrokeGcodeTop(text, x, y, scale, feed, power) {
+async function drawStrokeGcodeTop(text, x, y, scale, feed, power, mirrorX = false, mirrorY = false) {
+  const chars = mirrorX ? [...String(text)].reverse() : [...String(text)]
   let cursor = x
-  for (const ch of String(text)) {
+  for (const ch of chars) {
     const glyph = fontGlyph(ch)
     for (const seg of glyph) {
       await call('sendCommand', { command: 'M5' })
-      await call('sendCommand', { command: `G0 X${fmt(cursor + seg[0] * scale)} Y${fmt(y + seg[1] * scale)}` })
+      const x0 = mirrorX ? cursor + (4 - seg[0]) * scale : cursor + seg[0] * scale
+      const y0 = mirrorY ? y + (6 - seg[1]) * scale : y + seg[1] * scale
+      const x1 = mirrorX ? cursor + (4 - seg[2]) * scale : cursor + seg[2] * scale
+      const y1 = mirrorY ? y + (6 - seg[3]) * scale : y + seg[3] * scale
+      await call('sendCommand', { command: `G0 X${fmt(x0)} Y${fmt(y0)}` })
       await call('sendCommand', { command: `M4 S${power}` })
-      await call('sendCommand', { command: `G1 X${fmt(cursor + seg[2] * scale)} Y${fmt(y + seg[3] * scale)} F${Math.round(feed)}` })
+      await call('sendCommand', { command: `G1 X${fmt(x1)} Y${fmt(y1)} F${Math.round(feed)}` })
     }
     cursor += 6 * scale
   }
   await call('sendCommand', { command: 'M5' })
 }
 
-async function drawStrokeGcodeLeft(text, x, y, scale, feed, power) {
+async function drawStrokeGcodeLeft(text, x, y, scale, feed, power, mirrorX = false, mirrorY = false) {
   const width = String(text).length * 6 * scale
+  const chars = mirrorX ? [...String(text)].reverse() : [...String(text)]
   let cursor = x - width
-  for (const ch of String(text)) {
+  for (const ch of chars) {
     const glyph = fontGlyph(ch)
     for (const seg of glyph) {
       await call('sendCommand', { command: 'M5' })
-      await call('sendCommand', { command: `G0 X${fmt(cursor + seg[0] * scale)} Y${fmt(y + seg[1] * scale)}` })
+      const x0 = mirrorX ? cursor + (4 - seg[0]) * scale : cursor + seg[0] * scale
+      const y0 = mirrorY ? y + (6 - seg[1]) * scale : y + seg[1] * scale
+      const x1 = mirrorX ? cursor + (4 - seg[2]) * scale : cursor + seg[2] * scale
+      const y1 = mirrorY ? y + (6 - seg[3]) * scale : y + seg[3] * scale
+      await call('sendCommand', { command: `G0 X${fmt(x0)} Y${fmt(y0)}` })
       await call('sendCommand', { command: `M4 S${power}` })
-      await call('sendCommand', { command: `G1 X${fmt(cursor + seg[2] * scale)} Y${fmt(y + seg[3] * scale)} F${Math.round(feed)}` })
+      await call('sendCommand', { command: `G1 X${fmt(x1)} Y${fmt(y1)} F${Math.round(feed)}` })
     }
     cursor += 6 * scale
   }
@@ -1236,7 +1280,7 @@ function activateTab(tab) {
 }
 
 function hookInputs() {
-  for (const id of ['line-length', 'z-step', 'step-count', 'laser-power', 'laser-tool', 'feed-rate', 'z-feed', 'cut-cols', 'cut-rows', 'cut-power-start', 'cut-power-step', 'cut-speed-start', 'cut-speed-step', 'cut-square-size', 'cut-gap', 'engrave-cols', 'engrave-rows', 'engrave-power-start', 'engrave-power-step', 'engrave-speed-start', 'engrave-speed-step', 'engrave-square-size', 'engrave-line-interval', 'rect-width', 'rect-height', 'rect-marker', 'rect-power', 'rect-speed']) {
+  for (const id of ['line-length', 'z-step', 'step-count', 'laser-power', 'laser-tool', 'feed-rate', 'z-feed', 'cut-cols', 'cut-rows', 'cut-power-start', 'cut-power-step', 'cut-speed-start', 'cut-speed-step', 'cut-square-size', 'cut-gap', 'cut-label-power', 'cut-label-speed', 'engrave-cols', 'engrave-rows', 'engrave-power-start', 'engrave-power-step', 'engrave-speed-start', 'engrave-speed-step', 'engrave-square-size', 'engrave-line-interval', 'engrave-label-power', 'engrave-label-speed', 'rect-width', 'rect-height', 'rect-marker', 'rect-power', 'rect-speed']) {
     $(id).addEventListener('input', () => {
       renderPlan()
       savePlan()
