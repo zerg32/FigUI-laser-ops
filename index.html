@@ -48,6 +48,10 @@
             <div class="param-controls"><input id="laser-power" class="param-input" type="number" min="0" step="1" value="100"><span class="param-unit">S</span></div>
           </div>
           <div class="param-row">
+            <span class="param-label">Laser tool</span>
+            <div class="param-controls"><input id="laser-tool" class="param-input" type="number" min="0" step="1" value="100"><span class="param-unit">T</span></div>
+          </div>
+          <div class="param-row">
             <span class="param-label">Feed rate</span>
             <div class="param-controls"><input id="feed-rate" class="param-input" type="number" min="1" step="1" value="1200"><span class="param-unit">mm/min</span></div>
           </div>
@@ -233,6 +237,7 @@ const defaults = {
   zStep: 0.25,
   stepCount: 5,
   laserPower: 100,
+  laserTool: 100,
   feedRate: 1200,
   zFeed: 600,
   cut: {
@@ -326,11 +331,12 @@ function readParams() {
   const zStep = Math.max(0.001, Math.abs(num('z-step', defaults.zStep)))
   const stepCount = Math.max(1, Math.round(num('step-count', defaults.stepCount)))
   const laserPower = Math.max(0, num('laser-power', defaults.laserPower))
+  const laserTool = Math.max(0, Math.round(num('laser-tool', defaults.laserTool)))
   const feedRate = Math.max(1, num('feed-rate', defaults.feedRate))
   const zFeed = Math.max(1, num('z-feed', defaults.zFeed))
   const linePitch = stepCount > 1 ? clamp(lineLength / stepCount, 1, 20) : 0
 
-  return { lineLength, zStep, stepCount, laserPower, feedRate, zFeed, linePitch }
+  return { lineLength, zStep, stepCount, laserPower, laserTool, feedRate, zFeed, linePitch }
 }
 
 function readGridParams(prefix) {
@@ -427,6 +433,10 @@ function rectMarkerSegments(p) {
   }).flat()
 }
 
+function laserToolProgramLines(tool) {
+  return tool > 0 ? [`T${Math.round(tool)} M6`] : []
+}
+
 function savePlan() {
   clearTimeout(state.saveTimer)
   state.saveTimer = setTimeout(async () => {
@@ -478,7 +488,7 @@ const GRID_GUTTER_Y = 14
 
 function buildFocusGcode() {
   const p = buildPlan()
-  const lines = ['(Laser Ops focus test)', 'G90 G21', 'M5', 'G0 X0 Y0']
+  const lines = ['(Laser Ops focus test)', 'G90 G21', ...laserToolProgramLines(p.laserTool), 'M5', 'G0 X0 Y0']
   for (const pass of p.passes) {
     lines.push(`G0 X${fmt(pass.startX)} Y${fmt(pass.y)}`)
     lines.push(`G1 Z${fmt(pass.z)} F${fmt(p.zFeed)}`)
@@ -492,9 +502,11 @@ function buildFocusGcode() {
 
 function buildGridProgram(mode) {
   const p = buildGridPlan(mode)
+  const tool = readParams().laserTool
   const lines = [
     mode === 'cut' ? '(Laser Ops cut grid)' : '(Laser Ops engrave grid)',
     'G90 G21',
+    ...laserToolProgramLines(tool),
     'M5',
     'G0 X0 Y0',
   ]
@@ -550,6 +562,7 @@ function buildRectProgram() {
   const lines = [
     '(Laser Ops rectangle markers)',
     'G90 G21',
+    ...laserToolProgramLines(readParams().laserTool),
     'M5',
     'G0 X0 Y0',
     `M4 S${Math.round(p.power)}`,
@@ -590,6 +603,7 @@ function loadParams(settings) {
   $('z-step').value = focus.zStep
   $('step-count').value = focus.stepCount
   $('laser-power').value = focus.laserPower
+  $('laser-tool').value = focus.laserTool
   $('feed-rate').value = focus.feedRate
   $('z-feed').value = focus.zFeed
   const cut = { ...defaults.cut, ...(settings?.cut || {}) }
@@ -976,6 +990,7 @@ async function startFocus() {
 
   try {
     await call('sendCommand', { command: 'G90 G21' })
+    for (const line of laserToolProgramLines(plan.laserTool)) await call('sendCommand', { command: line })
     await call('sendCommand', { command: 'M5' })
     await call('sendCommand', { command: 'G0 X0 Y0' })
 
@@ -1216,7 +1231,7 @@ function activateTab(tab) {
 }
 
 function hookInputs() {
-  for (const id of ['line-length', 'z-step', 'step-count', 'laser-power', 'feed-rate', 'z-feed', 'cut-cols', 'cut-rows', 'cut-power-start', 'cut-power-step', 'cut-speed-start', 'cut-speed-step', 'cut-square-size', 'cut-gap', 'engrave-cols', 'engrave-rows', 'engrave-power-start', 'engrave-power-step', 'engrave-speed-start', 'engrave-speed-step', 'engrave-square-size', 'engrave-line-interval', 'rect-width', 'rect-height', 'rect-marker', 'rect-power', 'rect-speed']) {
+  for (const id of ['line-length', 'z-step', 'step-count', 'laser-power', 'laser-tool', 'feed-rate', 'z-feed', 'cut-cols', 'cut-rows', 'cut-power-start', 'cut-power-step', 'cut-speed-start', 'cut-speed-step', 'cut-square-size', 'cut-gap', 'engrave-cols', 'engrave-rows', 'engrave-power-start', 'engrave-power-step', 'engrave-speed-start', 'engrave-speed-step', 'engrave-square-size', 'engrave-line-interval', 'rect-width', 'rect-height', 'rect-marker', 'rect-power', 'rect-speed']) {
     $(id).addEventListener('input', () => {
       renderPlan()
       savePlan()
